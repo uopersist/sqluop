@@ -1,0 +1,143 @@
+* Doc Links
+*** https://docs.sqlalchemy.org/en/20/tutorial/
+* Basics
+** Schema and other declarartive aspects
+Unlike in a NoSQL database creating collections/tables in SQL database requires metadata of the schema of the collections/tables and this metadata be applied to the database.
+
+This means that collection creation must include schema related information for SQL databases.
+
+In UOP there are three types of collections.
+
+in UOP the heart of getting or setting up a UOP collection is get_managed_collection.
+** Long transactions
+
+** Tasks
+*** DONE Create get_managed_collection that does right thing for SQL
+CLOSED: [2024-07-16 Tue 14:22]
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2024-07-16 Tue 14:22]
+:END:
+
+*** DONE set up to_database, from_database
+CLOSED: [2024-07-16 Tue 14:22]
+:LOGBOOK:
+- State "DONE"       from "TODO"       [2024-07-16 Tue 14:22]
+:END:
+Goes between standard internal dict form and what is appropriate to type of database
+Get operations from database must go through from_database and write operations to database must go through to_database.  Ideally all write operations are restricted to apply a changeset to a database.
+
+It is possible that a large part of to_database is whether to jsonify collection structure such as lists and dicts.  Whethere to jsonify is a property of tghe type of database in use. 
+
+**** TODO test these conversions against all existing types
+
+** Meta Collections
+These describe the database itself plus Queries.  These are described as far as schema by the corresponding pydantic classes. 
+** Instance Collections
+Each of these contains the instances of a Class.  These are thus described by the attributes of that class.
+** Miscellaneous Housekeeping
+These include collections such as User, Tenant, Schemas.  They could be included in Meta
+** BDCollection superclass considerations
+*** _coll
+In document orient database such as mongodb the collection object
+- has knowledge of database within it
+- has raw ability within it for many operations on collection
+So in SQLAlchemy we need a object that at least
+- has knowledge of database or at least engine/connection
+- has knowledge of schema (pydantic or class via attributes) for some serialization needs?
+** Transaction Handling
+In reference Mongo implementation we have overall transaction created with beginTransaction or immediate mode.  The same needs to be avaliable in SQLAlchemy Database subclass.
+Actually that isn't correct.  Transaction is already and always abstracted in UOP.  The abstraction is that changes are only in changeset until changeset is applied to database. That is either delayed in case of long explicit transaction or immediate.  So all the detail is in apply_to_database for any type of database.  
+see https://docs.sqlalchemy.org/en/20/core/connections.html#dbapi-autocommit
+https://docs.sqlalchemy.org/en/20/tutorial/dbapi_transactions.html#committing-changes
+*** TODO understand BEGIN IMPLICT and where it applies
+*** TODO can we use same db operation python wrapper across both?
+Does the wrapper itself need to be able to be specialized?
+
+** Schema level
+Produce a Base (e.g. via declarative_base).  This acts as collector of Table objects which describe schema of the tables involved.  It is actually a Metadata object that keeps track of Tables and such.
+
+
+Create engine or connection.
+
+Apply Base to that connection or engine.  This ensures the defined tables are on the database.  Can optionally override existing tables
+*** TODO  Learn in more detail about this and especially re migration
+*** TODO understand relationship between Metadata and Base
+
+* Learning
+** Engine
+** Connection
+Connection pattern is basically a with single connection supporting commit/abort etc.
+#+begin_src python
+with engine.connect() as conn:
+    conn.execute(text("CREATE TABLE some_table (x int, y int)"))
+    conn.execute(
+        text("INSERT INTO some_table (x, y) VALUES (:x, :y)"),
+        [{"x": 1, "y": 1}, {"x": 2, "y": 4}],
+    )
+    conn.commit()
+#=end_src
+*** engine.connect() vs engine.begin() ??
+
+** Session
+#+begin_quote
+The fundamental transactional / database interactive object when using the ORM is called the Session. In modern SQLAlchemy, this object is used in a manner very similar to that of the Connection, and in fact as the Session is used, it refers to a Connection internally which it uses to emit SQL.
+#+end_quote
+
+Session object itself tracks new and modified objects.  This may or may not be a problem.
+*** TODO ascertain whether SQLAlchemy ORM gets in the way or not
+At the least how we clean up when writing changeset to database.
+For instance an extra query on object modified in changeset would be in Session.dirty and refetch would first autoflush changes.  This could potentially lead to inconsistencies.
+
+It might be that using raw connection is better for our UOP transaction patterns or at least guaranteed to be consistent. 
+** Metadata
+** Operations
+*** insert
+Need engin and metadata
+#+begin_src python
+  from sqlalchemy import insert
+
+# Insert a single row
+insert_stmt = users.insert().values(name='John Doe')
+engine.execute(insert_stmt)
+
+# Insert multiple rows
+values = [
+    {'name': 'Jane Smith'},
+    {'name': 'Bob Johnson'},
+]
+engine.execute(users.insert(), values)
+
+#+end_src
+*** query
+#+begin_src python
+      select_stmt = select([users]).where(users.c.name.like('J%'))
+    # or
+    from sqlalchemy import select
+
+  select_stmt = select([users])
+  result = engine.execute(select_stmt)
+
+  for row in result:
+      print(row)
+      
+#+end_src
+**** UOP considerations
+Need knowledge of internal type to ensure proper deserialization.
+*** Update
+#+begin_src python
+from sqlalchemy import update
+
+update_stmt = update(users).where(users.c.id == 1).values(name='John Smith')
+engine.execute(update_stmt)
+
+#+end_src
+*** delete
+#+begin_src python
+    from sqlalchemy import delete
+
+    delete_stmt = delete(users).where(users.c.id == 1)
+    engine.execute(delete_stmt)
+#+end_src
+
+*** Tranasctions
+Can get a connection with engine.begin().  Connection.commit() etc to close.  But it looks like a with construct so may need some explicit exit if not working blockwise. 
